@@ -90,7 +90,7 @@ class Seal():
         python列表明文'''
         plain_struct = self.__decryption_fn(cipher, self.parameters, self.keys.SecretKey)
         py_list = plain_struct.data[:require_length]
-        self.delete_plain_memory(plain_struct)
+        self.delete_plain_memory(byref(plain_struct))
         return py_list
 
     def add(self, cipher_l, cipher_r):

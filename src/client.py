@@ -8,15 +8,19 @@ from seal import *
 
 
 class Client():
-    def __init__(self, id, sealer):
+    def __init__(self, id, params, sealer, lock):
         self.dataset = torchvision.datasets.CIFAR10("./resource/cifar10", train=True,
                                                     transform=torchvision.transforms.ToTensor(), download=True)
         self.local_module = self.__to_cuda__(cifar10())
+        self.lock = lock
+        self.set_parameters(params)
         self.trans = Transformer()
         self.module_length = len(self.trans.para_to_list(self.local_module.state_dict(), self.local_module))
+        self.__loss_fn = self.__to_cuda__(CrossEntropyLoss())
+        self.learning_rate = 0.01
+        self.__optim = torch.optim.SGD(self.local_module.parameters(), lr=self.learning_rate)
         self.sealer = sealer
         self.client_id = id
-        self.learning_rate = 0.01
         self.pg = 5.0e-4
         self.ng = -5.0e-4
 
@@ -24,85 +28,83 @@ class Client():
         if(torch.cuda.is_available()):
             return module.cuda()
         
+    def set_parameters(self, parameters):
+        self.local_module.load_state_dict(parameters)
+        
 
-    def set_parameters(self, para, divide_num):
+    def set_gradients(self, para, divide_num):
         '''设置参与方本地模型参数,'''
         if isinstance(para, cipher_list) == False:
             raise Exception("模型参数类型不正确.")
         #先解密
+        self.lock.acquire()
         parameters_list = self.sealer.decrypt(para, self.module_length)
-        #再转化为tensor
+        self.lock.release()
+        #转为tensor
         parameters_tensor = torch.tensor(parameters_list)
         #计算平均
         parameters_tensor = parameters_tensor / divide_num
-        #转化为dict
-        parameters_dict = self.trans.list_to_para(parameters_tensor, self.local_module)
-        #设置参数
-        self.local_module.load_state_dict(parameters_dict, strict=True)
-        
+        #设置grad
+        self.trans.list_to_grad(parameters_tensor, self.local_module.parameters(), self.local_module)
+        #更新梯度
+        self.__optim.step()
 
 
     def set_gradient_rate(self, rate):
         self.pg = self.pg * rate
         self.ng = self.ng * rate
 
-    def set_grad(self, parameters):
+        
+    def get_gradients(self):
         with torch.set_grad_enabled(True):
-            trans = Transformer()
-            #迭代parameters的每个tensor
-            for value in parameters:
-                #获得每个tensor的grad
+            result_lst = []
+            for value in self.local_module.parameters():
                 ten_grad_peer_para = value.grad.data
-                #转换为ng and pg
-                big_bool = (ten_grad_peer_para > 0).float()
-                small_bool = (ten_grad_peer_para < 0).float()
-                big_num = big_bool * self.pg
-                small_num = small_bool * self.ng
-                ten_grad_peer_para = big_num + small_num
-                value.grad.data = ten_grad_peer_para
-            return parameters
+                pos_bool = (ten_grad_peer_para > 0).float()
+                neg_bool = (ten_grad_peer_para < 0).float()
+                pos_grad = pos_bool * ten_grad_peer_para
+                neg_grad = neg_bool * ten_grad_peer_para
+                sum_fn_list = list(range(len(list(ten_grad_peer_para.shape))))
+                pg = pos_grad.sum(sum_fn_list) / pos_bool.sum(sum_fn_list)
+                ng = neg_grad.sum(sum_fn_list) / neg_bool.sum(sum_fn_list)
+                ten_grad_peer_para = (pos_bool * pg.item()) + (neg_bool * ng.item())
+                
+                ten_grad_peer_para = ten_grad_peer_para.reshape([-1])
+                ten_grad_peer_para = ten_grad_peer_para.cpu()
+                lst = ten_grad_peer_para.numpy().tolist()
+                result_lst = result_lst + lst
+            return result_lst
 
-    def update_parameters(self, epoch, mini_batch):
-        #先设置模型参数
-        #self.set_parameters(para)
 
-        trans = Transformer()
-        loss_fn = self.__to_cuda__(CrossEntropyLoss())
-        optim = torch.optim.SGD(self.local_module.parameters(), lr=self.learning_rate)
+
+    def update_parameters(self, params_queue, epoch, mini_batch):
         train_batchs = DataLoader(self.dataset, mini_batch, True)
         
         #epoch轮迭代
         self.local_module.eval()
         print("参与方{}开始训练..".format(self.client_id))
-        loss_mean = 0
-        total_loss = 0
+        self.__curr_loss = 0
         #一次迭代
-        i = 0
-        for image, label in train_batchs:
-            #计算输出
-            image = self.__to_cuda__(image)
-            label = self.__to_cuda__(label)
-            output = self.local_module(image)
-            #计算损失
-            loss = loss_fn(output, label)
-            #初始化梯度参数
-            optim.zero_grad()
-            #反向传播
-            loss.backward()
-            #self.set_grad(self.local_module.parameters())
-            optim.step()
-            total_loss += loss
-            #end-if
-            i += 1
-            if(i >= epoch): break
-        loss_mean = total_loss / epoch
-        print("第{}个参与方{}轮迭代, 损失值：{}".format(self.client_id, i, loss_mean))
-        #返回encrypted parameters
-        parameters_list = trans.para_to_list(self.local_module.state_dict(), self.local_module)
-        return self.sealer.encrypt(parameters_list)
+        image, label = train_batchs.__iter__().__next__()
+        #计算输出
+        image = self.__to_cuda__(image)
+        label = self.__to_cuda__(label)
+        output = self.local_module(image)
+        #计算损失
+        self.__curr_loss = self.__loss_fn(output, label)
+        print("第{}个参与方迭代, 损失值：{}".format(self.client_id, self.__curr_loss))
+        #初始化梯度参数
+        self.__optim.zero_grad()
+        #反向传播
+        self.__curr_loss.backward()
+        gradient_list = self.get_gradients()
+        self.lock.acquire()
+        params_queue.put(self.sealer.encrypt(gradient_list), block=True)
+        self.lock.release()
+        return
 
     def test(self, module_path=None):
-        mini_batch = 64
+        mini_batch = 200
         #如果提供了保存模型路径应该从路径读取
         if module_path != None:
             self.local_module.load_state_dict(torch.load(module_path))

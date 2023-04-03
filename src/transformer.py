@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 
+
 class Transformer():
     def __init__(self) -> None:
         pass
@@ -17,6 +18,20 @@ class Transformer():
             result_lst = result_lst + lst
         return result_lst
     
+    def grad_to_list(self, parameters, module) -> list:
+        '''将梯度构造成一个列表'''
+        if isinstance(module, torch.nn.Module) == False:
+            raise ValueError("模型参数类型不正确")
+        result_lst = []
+        for value in parameters:
+            ten_grad_peer_para = value.grad.data
+            ten_grad_peer_para = ten_grad_peer_para.reshape([-1])
+            ten_grad_peer_para = ten_grad_peer_para.cpu()
+            lst = ten_grad_peer_para.numpy().tolist()
+            result_lst = result_lst + lst
+        return result_lst
+
+    
     def list_to_para(self, lst, module):
         '''将一个列表lst构造成模型module的参数dict类型'''
         if isinstance(module, torch.nn.Module) == False:
@@ -31,3 +46,18 @@ class Transformer():
             para_dict[key] = tens
         return para_dict
 
+    def list_to_grad(self, lst, parameters, module):
+        if isinstance(module, torch.nn.Module) == False:
+            raise ValueError("模型参数类型不正确")
+        with torch.set_grad_enabled(True):
+            for value in parameters:
+                try:
+                    curr_grad = value.grad.data
+                except AttributeError as ex:
+                    return
+                #curr_grad = curr_grad.cpu()
+                field = np.prod(list(curr_grad.shape))
+                filed_lst = lst[:field]
+                lst = lst[field:]
+                set_grad = torch.Tensor(filed_lst).reshape(curr_grad.shape)
+                value.grad.data = set_grad.cuda()
