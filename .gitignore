@@ -1,0 +1,5 @@
+*.pyc
+*.user
+*.filters
+*.vcxproj
+/seal_dll/x64/
