@@ -3,6 +3,7 @@
 *.filters
 *.vcxproj
 *.sln
+/resource/
 /seal_dll/.vs/
 /seal_dll/test/
 /seal_dll/seal_dll/x64/
