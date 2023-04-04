@@ -1,9 +1,9 @@
 #pragma once
 
 #ifdef TEST_DLL
-#define TEST_DLL_API _declspec(dllexport)
+#define TEST_DLL_API extern "C" _declspec(dllexport)
 #else
-#define TEST_DLL_API _declspec(dllimport)
+#define TEST_DLL_API extern "C" _declspec(dllimport)
 #endif
 
 

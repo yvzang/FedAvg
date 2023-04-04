@@ -6,8 +6,7 @@
 #include<vector>
 #include<math.h>
 #include<iterator>
-#include"Plain_Interface.h"
-#include"Cipher_Interface.h"
+#include"DataInterface.h"
 #include "Test_Dll.h"
 
 
@@ -83,7 +82,7 @@ cipher_list encryption(py_plain_list plains, ser_params_t ser_params, ser_public
 	double scale = pow(2.0, 40);
 	CKKSEncoder encoder(context);
 
-	Plain_Interface plain_inter(plains.data, plains.length, encoder.slot_count());
+	DataInterface plain_inter(plains.data, plains.length, encoder.slot_count());
 	//转化为Plaintext
 	plain_inter.encoding(encoder, scale);
 	//还原公钥，加密
@@ -92,7 +91,7 @@ cipher_list encryption(py_plain_list plains, ser_params_t ser_params, ser_public
 	Encryptor encryptor(context, pbky);
 	plain_inter.encrypting(encryptor);
 
-	return plain_inter();
+	return plain_inter.to_cipher();
 }
 
 py_plain_list decryption(cipher_list ser_cipher, ser_params_t ser_params, ser_secret_key_t ser_sercret_key) {
@@ -104,7 +103,7 @@ py_plain_list decryption(cipher_list ser_cipher, ser_params_t ser_params, ser_se
 	SEALContext context(params);
 	//创建encoder
 	CKKSEncoder encoder(context);
-	Cipher_Interface cipher_inter(ser_cipher, context, encoder.slot_count());
+	DataInterface cipher_inter(ser_cipher, context, encoder.slot_count());
 	//还原私钥，解密
 	SecretKey skky;
 	seriazation2class_c(skky, context, ser_sercret_key);
@@ -114,7 +113,7 @@ py_plain_list decryption(cipher_list ser_cipher, ser_params_t ser_params, ser_se
 	//decode
 	cipher_inter.decoding(encoder, encoder.slot_count());
 	//vector to plain list
-	return cipher_inter();
+	return cipher_inter.to_plain();
 }
 
 cipher_list addition(cipher_list cipher_l, cipher_list cipher_r, ser_params_t ser_params, ser_relin_key_t ser_relin_key) {
@@ -131,11 +130,10 @@ cipher_list addition(cipher_list cipher_l, cipher_list cipher_r, ser_params_t se
 	RelinKeys relin_key;
 	seriazation2class_c<RelinKeys>(relin_key, context, ser_relin_key);
 	//add
-	Cipher_Interface inter_l(cipher_l, context, 4096);
-	Cipher_Interface inter_r(cipher_r, context, 4096);
-	Cipher_Interface inter_result = inter_l.add(inter_r, evaluator, relin_key);
-	Plain_Interface plain_inter;
-	return plain_inter.to_cipher_list(inter_result.get_cipher_list());
+	DataInterface inter_l(cipher_l, context, 4096);
+	DataInterface inter_r(cipher_r, context, 4096);
+	DataInterface inter_result = inter_l.add(inter_r, evaluator, relin_key);
+	return inter_result.to_cipher();
 }
 
 cipher_list mutiplication(cipher_list cipher_l, cipher_list cipher_r, ser_params_t ser_params, ser_relin_key_t ser_relin_key) {
@@ -152,11 +150,10 @@ cipher_list mutiplication(cipher_list cipher_l, cipher_list cipher_r, ser_params
 	RelinKeys relin_key;
 	seriazation2class_c<RelinKeys>(relin_key, context, ser_relin_key);
 	//multiple
-	Cipher_Interface cipher_inter_l(cipher_l, context, 4096);
-	Cipher_Interface cipher_inter_r(cipher_r, context, 4096);
-	Cipher_Interface inter_result = cipher_inter_l.multiple(cipher_inter_r, valuator, relin_key);
-	Plain_Interface plain_inter;
-	return plain_inter.to_cipher_list(inter_result.get_cipher_list());
+	DataInterface cipher_inter_l(cipher_l, context, 4096);
+	DataInterface cipher_inter_r(cipher_r, context, 4096);
+	DataInterface inter_result = cipher_inter_l.multiple(cipher_inter_r, valuator, relin_key);
+	return inter_result.to_cipher();
 }
 
 void delete_cipher_list(cipher_list& ciphers) {
