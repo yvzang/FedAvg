@@ -61,3 +61,15 @@ class Transformer():
                 lst = lst[field:]
                 set_grad = torch.Tensor(filed_lst).reshape(curr_grad.shape)
                 value.grad.data = set_grad.cuda()
+
+    def list_add(self, lst1, lst2):
+        lst1_ten = torch.tensor(lst1)
+        lst2_ten = torch.tensor(lst2)
+        if(lst1.shape() != lst2.shape()):
+            raise ValueError("参数形状匹配不正确.")
+        return (lst1 + lst2).tolist()
+    
+    def list_divide(self, lst, div_num):
+        lst_ten = torch.tensor(lst)
+        lst_ten = lst_ten / div_num
+        return lst_ten.tolist()

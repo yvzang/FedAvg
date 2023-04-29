@@ -4,11 +4,11 @@ from torch.nn.modules import CrossEntropyLoss
 from transformer import Transformer
 import torch
 import torchvision
-from seal import *
+from scipy import stats
 
 
 class Client():
-    def __init__(self, id, params, sealer, lock):
+    def __init__(self, id, params, lock, writer):
         self.dataset = torchvision.datasets.CIFAR10("./resource/cifar10", train=True,
                                                     transform=torchvision.transforms.ToTensor(), download=True)
         self.local_module = self.__to_cuda__(cifar10())
@@ -19,10 +19,9 @@ class Client():
         self.__loss_fn = self.__to_cuda__(CrossEntropyLoss())
         self.learning_rate = 0.01
         self.__optim = torch.optim.SGD(self.local_module.parameters(), lr=self.learning_rate)
-        self.sealer = sealer
         self.client_id = id
-        self.pg = 5.0e-4
-        self.ng = -5.0e-4
+        self.writer = writer
+        self.taltol_epoch = 0
 
     def __to_cuda__(self, module):
         if(torch.cuda.is_available()):
@@ -30,76 +29,55 @@ class Client():
         
     def set_parameters(self, parameters):
         self.local_module.load_state_dict(parameters)
-        
 
-    def set_gradients(self, para, divide_num):
-        '''设置参与方本地模型参数,'''
-        if isinstance(para, cipher_list) == False:
-            raise Exception("模型参数类型不正确.")
-        #先解密
-        self.lock.acquire()
-        parameters_list = self.sealer.decrypt(para, self.module_length)
-        self.lock.release()
-        #转为tensor
-        parameters_tensor = torch.tensor(parameters_list)
-        #计算平均
-        parameters_tensor = parameters_tensor / divide_num
-        #设置grad
-        self.trans.list_to_grad(parameters_tensor, self.local_module.parameters(), self.local_module)
-        #更新梯度
-        self.__optim.step()
+    def get_parameters(self):
+        return self.local_module.state_dict()
 
-
-    def set_gradient_rate(self, rate):
-        self.pg = self.pg * rate
-        self.ng = self.ng * rate
-
-        
-    def get_gradients(self):
-        with torch.set_grad_enabled(True):
-            result_lst = []
-            for value in self.local_module.parameters():
-                ten_grad_peer_para = value.grad.data
-                pos_bool = (ten_grad_peer_para > 0).float()
-                neg_bool = (ten_grad_peer_para < 0).float()
-                pos_grad = pos_bool * ten_grad_peer_para
-                neg_grad = neg_bool * ten_grad_peer_para
-                sum_fn_list = list(range(len(list(ten_grad_peer_para.shape))))
-                pg = pos_grad.sum(sum_fn_list) / pos_bool.sum(sum_fn_list)
-                ng = neg_grad.sum(sum_fn_list) / neg_bool.sum(sum_fn_list)
-                ten_grad_peer_para = (pos_bool * pg.item()) + (neg_bool * ng.item())
-                
-                ten_grad_peer_para = ten_grad_peer_para.reshape([-1])
-                ten_grad_peer_para = ten_grad_peer_para.cpu()
-                lst = ten_grad_peer_para.numpy().tolist()
-                result_lst = result_lst + lst
-            return result_lst
-
+    def set_parameters_from_list(self, params_lst):
+        self.set_parameters(self.trans.list_to_para(params_lst, self.local_module))
+    
+    def print_percent(self, percent):
+        taltol_length = 40
+        shap_num = int(percent * 40)
+        line_num = taltol_length - shap_num
+        _format_shap = "#" * shap_num
+        _formate_line = "-" * line_num
+        print(_format_shap + _formate_line)
 
 
     def update_parameters(self, params_queue, epoch, mini_batch):
-        train_batchs = DataLoader(self.dataset, mini_batch, True)
-        
+        elem_num_list = torch.zeros([1]).int()
         #epoch轮迭代
         self.local_module.eval()
         print("参与方{}开始训练..".format(self.client_id))
-        self.__curr_loss = 0
         #一次迭代
-        image, label = train_batchs.__iter__().__next__()
-        #计算输出
-        image = self.__to_cuda__(image)
-        label = self.__to_cuda__(label)
-        output = self.local_module(image)
-        #计算损失
-        self.__curr_loss = self.__loss_fn(output, label)
-        print("第{}个参与方迭代, 损失值：{}".format(self.client_id, self.__curr_loss))
-        #初始化梯度参数
-        self.__optim.zero_grad()
-        #反向传播
-        self.__curr_loss.backward()
-        gradient_list = self.get_gradients()
+        for ep in range(epoch):
+            train_batchs = DataLoader(self.dataset, mini_batch, True)
+            curr_loss = 0
+            image, label = train_batchs.__iter__().__next__()
+            elem_num_list = elem_num_list + torch.unique(label, return_counts=True)[1].int()
+            #计算输出
+            image = self.__to_cuda__(image)
+            label = self.__to_cuda__(label)
+            output = self.local_module(image)
+            #计算损失
+            curr_loss = self.__loss_fn(output, label)
+            #初始化梯度参数
+            self.__optim.zero_grad()
+            #反向传播
+            curr_loss.backward()
+            self.__optim.step()
+            #记录曲线
+            self.writer.add_scalars(main_tag="loss", tag_scalar_dict={"without_kl_".format(self.client_id): curr_loss}, global_step=self.taltol_epoch)
+            self.taltol_epoch = self.taltol_epoch + 1
+        elem_taltol_num = elem_num_list.sum()
+        #计算kl散度
+        p = elem_num_list.float() / elem_taltol_num
+        q = [1/10 for i in range(10)]
+        kl_div = stats.entropy(p.tolist(), q)
+        print("第{}个参与方迭代, 损失值：{}".format(self.client_id, curr_loss))
         self.lock.acquire()
-        params_queue.put(self.sealer.encrypt(gradient_list), block=True)
+        params_queue.put({"params":self.trans.para_to_list(self.get_parameters(), self.local_module), "kl_div": kl_div}, block=True)
         self.lock.release()
         return
 

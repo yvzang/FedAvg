@@ -36,22 +36,6 @@ class cifar10(torch.nn.Module):
         return tens
     
 if __name__ == "__main__":
-    '''sealer = Seal()
-    module = cifar10()
-    module1 = cifar10()
-    trans = Transformer()
-
-    params_list = trans.para_to_list(module.state_dict(), module)
-    params_list1 = trans.para_to_list(module1.state_dict(), module1)
-    encrypted_params = sealer.encrypt(params_list)
-    encrypted_params1 = sealer.encrypt(params_list1)
-
-
-    mut_encrypted = sealer.mutiple(encrypted_params, encrypted_params1)
-    decrypted_params = sealer.decrypt(mut_encrypted, params_list.__len__())
-    '''
-
-    m = cifar10()
-    input = torch.randn(20, 3, 32, 32)
-    out = m(input)
-    print(out.shape)
+    elem_num_list = torch.zeros([1]).int()
+    elem_num_list = elem_num_list + torch.tensor([1, 2, 4]).int()
+    print(elem_num_list)
