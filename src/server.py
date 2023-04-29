@@ -33,10 +33,11 @@ class Server():
         self.clients = [Client(i, module.state_dict(), lock, self.writer) for i in range(client_num)]
 
     def print_percent(self, percent):
-        taltol_length = 40
-        shap_num = int(percent * 40)
+        taltol_length = 100
+        shap_num = int(percent * taltol_length)
         line_num = taltol_length - shap_num
         _format_shap = "#" * shap_num
+        _format_shap = _format_shap + str(percent)
         _formate_line = "-" * line_num
         print(_format_shap + _formate_line)
         

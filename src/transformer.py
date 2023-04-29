@@ -65,9 +65,9 @@ class Transformer():
     def list_add(self, lst1, lst2):
         lst1_ten = torch.tensor(lst1)
         lst2_ten = torch.tensor(lst2)
-        if(lst1.shape() != lst2.shape()):
+        if(lst1_ten.shape != lst2_ten.shape):
             raise ValueError("参数形状匹配不正确.")
-        return (lst1 + lst2).tolist()
+        return (lst1_ten + lst2_ten).tolist()
     
     def list_divide(self, lst, div_num):
         lst_ten = torch.tensor(lst)
