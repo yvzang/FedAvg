@@ -37,7 +37,7 @@ class Server():
         shap_num = int(percent * taltol_length)
         line_num = taltol_length - shap_num
         _format_shap = "#" * shap_num
-        _format_shap = _format_shap + "%" + str(percent.sum() * 100)
+        _format_shap = _format_shap + "%" + str(percent.item() * 100)
         _formate_line = "-" * line_num
         print(_format_shap + _formate_line)
         
@@ -106,7 +106,8 @@ class Server():
         kl_ten = torch.Tensor(kl_list)
         kl_taltol = kl_ten.sum()
         #熵权法算出所占比例
-        kl_percent =((-kl_ten + 1) / (len(kl_list) + kl_taltol))
+        kl_percent =((-kl_ten + 1) / (len(kl_list) - kl_taltol))
+        kl_percent.max()
         print(kl_percent)
         #加权平均
         result_ten = torch.zeros(1).float()
