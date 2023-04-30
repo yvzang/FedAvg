@@ -2,30 +2,38 @@ from Module import cifar10
 from torch.utils.data import DataLoader, Dataset
 from torch.nn.modules import CrossEntropyLoss
 from transformer import Transformer
+from torch.utils.data import WeightedRandomSampler
 import torch
 import torchvision
 from scipy import stats
 
 
 class Client():
-    def __init__(self, id, params, lock, writer):
+    def __init__(self, id):
         self.dataset = torchvision.datasets.CIFAR10("./resource/cifar10", train=True,
                                                     transform=torchvision.transforms.ToTensor(), download=True)
         self.local_module = self.__to_cuda__(cifar10())
-        self.lock = lock
-        self.set_parameters(params)
         self.trans = Transformer()
         self.module_length = len(self.trans.para_to_list(self.local_module.state_dict(), self.local_module))
         self.__loss_fn = self.__to_cuda__(CrossEntropyLoss())
         self.learning_rate = 0.01
         self.__optim = torch.optim.SGD(self.local_module.parameters(), lr=self.learning_rate)
         self.client_id = id
-        self.writer = writer
         self.taltol_epoch = 0
+        self.weights = [1 for image, label in self.dataset]
+
+    def client_init(self, params, lock, writer):
+        self.set_parameters(params)
+        self.lock = lock
+        self.writer = writer
 
     def __to_cuda__(self, module):
         if(torch.cuda.is_available()):
             return module.cuda()
+        
+    def set_weight(self, bios = None):
+        if(bios is not None):
+            self.weights = [5 if label in bios else 1 for image, label in self.dataset]
         
     def set_parameters(self, parameters):
         self.local_module.load_state_dict(parameters)
@@ -47,29 +55,31 @@ class Client():
 
     def update_parameters(self, params_queue, epoch, mini_batch):
         elem_num_list = torch.zeros([1]).int()
-        #epoch轮迭代
+        
         self.local_module.eval()
+
+        sampler = WeightedRandomSampler(self.weights, self.dataset.__len__(), True)
         print("参与方{}开始训练..".format(self.client_id))
         #一次迭代
         curr_loss = 0
         for ep in range(epoch):
-            train_batchs = DataLoader(self.dataset, mini_batch, True)
-            image, label = train_batchs.__iter__().__next__()
-            elem_num_list = elem_num_list + torch.unique(label, return_counts=True)[1].int()
-            #计算输出
-            image = self.__to_cuda__(image)
-            label = self.__to_cuda__(label)
-            output = self.local_module(image)
-            #计算损失
-            curr_loss = self.__loss_fn(output, label)
-            #初始化梯度参数
-            self.__optim.zero_grad()
-            #反向传播
-            curr_loss.backward()
-            self.__optim.step()
-            #记录曲线
-            self.writer.add_scalars(main_tag="loss", tag_scalar_dict={"without_kl_".format(self.client_id): curr_loss}, global_step=self.taltol_epoch)
-            self.taltol_epoch = self.taltol_epoch + 1
+            train_batchs = DataLoader(self.dataset, mini_batch, False, sampler)
+            for image, label in train_batchs:
+                elem_num_list = elem_num_list + torch.unique(label, return_counts=True)[1].int()
+                #计算输出
+                image = self.__to_cuda__(image)
+                label = self.__to_cuda__(label)
+                output = self.local_module(image)
+                #计算损失
+                curr_loss = self.__loss_fn(output, label)
+                #初始化梯度参数
+                self.__optim.zero_grad()
+                #反向传播
+                curr_loss.backward()
+                self.__optim.step()
+                #记录曲线
+                self.writer.add_scalars(main_tag="loss", tag_scalar_dict={"without_kl_".format(self.client_id): curr_loss}, global_step=self.taltol_epoch)
+                self.taltol_epoch = self.taltol_epoch + 1
         elem_taltol_num = elem_num_list.sum()
         #计算kl散度
         p = elem_num_list.float() / elem_taltol_num

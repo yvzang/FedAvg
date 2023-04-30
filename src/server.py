@@ -12,25 +12,22 @@ import psutil
 
 class Server():
     def __init__(self):
-        self.init_module()
         self.module_path = "module.pth"
+        self.module = cifar10()
+        self.clients = []
         self.trans = Transformer()
         self.writer = SummaryWriter(log_dir="./runs/fedprox")
-    
-    def init_module(self):
-        '''初始化模型'''
-        #self.module = self.__to_cuda__(cifar10())
 
     def __to_cuda__(self, module):
         if(torch.cuda.is_available()):
             return module.cuda()
         
-    def __train_init__(self, client_num):
-        '''确定参与方数量，初始化模型参数'''
-        #设置全局模型参数
-        self.module = cifar10()
+    def add_clients(self, clients):
         lock = Lock()
-        self.clients = [Client(i, self.module.state_dict(), lock, self.writer) for i in range(client_num)]
+        for c in clients:
+            c.client_init(self.module.state_dict(), lock, self.writer)
+            self.clients.append(c)
+        
 
     def print_percent(self, percent):
         taltol_length = 100
@@ -42,9 +39,10 @@ class Server():
         print(_format_shap + _formate_line)
         
 
-    def train(self, test_epoch, end_rate, train_rate, epoch, batch_size, client_num):
+    def train(self, test_epoch, end_rate, train_rate, epoch, batch_size):
         '''训练模型参数'''
-        self.__train_init__(client_num)
+        if(len(self.clients) == 0):
+            raise RuntimeError("客户端未连接")
         #进行epoch轮迭代
         choiced_clients_num = int(train_rate * len(self.clients))
         total_epoch = 0
@@ -55,13 +53,14 @@ class Server():
             params_queue = queue.Queue(maxsize=len(self.clients))
             thread_list = []
             for single_client in choiced_clients:
-                #同步训练，获得局部模型参数
+                '''#同步训练，获得局部模型参数
                 thread = Thread(target=single_client.update_parameters, args=(params_queue, epoch, batch_size), daemon=True, name="{}".format(single_client.client_id))
                 thread_list.append(thread)
                 thread.start()
             #等待参与方训练完成
             for t in thread_list:
-                t.join()
+                t.join()'''
+                single_client.update_parameters(params_queue, epoch, batch_size)
             #加权平均
             global_params = self.__parameter_weight_divition__(params_queue)
             self.set_clients_parameters(self.clients, global_params)
