@@ -36,6 +36,4 @@ class cifar10(torch.nn.Module):
         return tens
     
 if __name__ == "__main__":
-    elem_num_list = torch.zeros([1]).int()
-    elem_num_list = elem_num_list + torch.tensor([1, 2, 4]).int()
-    print(elem_num_list)
+    print(torch.zeros(1).float())

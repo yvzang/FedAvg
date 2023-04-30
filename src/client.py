@@ -51,9 +51,9 @@ class Client():
         self.local_module.eval()
         print("参与方{}开始训练..".format(self.client_id))
         #一次迭代
+        curr_loss = 0
         for ep in range(epoch):
             train_batchs = DataLoader(self.dataset, mini_batch, True)
-            curr_loss = 0
             image, label = train_batchs.__iter__().__next__()
             elem_num_list = elem_num_list + torch.unique(label, return_counts=True)[1].int()
             #计算输出

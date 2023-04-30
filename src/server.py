@@ -28,26 +28,25 @@ class Server():
     def __train_init__(self, client_num):
         '''确定参与方数量，初始化模型参数'''
         #设置全局模型参数
-        module = cifar10()
+        self.module = cifar10()
         lock = Lock()
-        self.clients = [Client(i, module.state_dict(), lock, self.writer) for i in range(client_num)]
+        self.clients = [Client(i, self.module.state_dict(), lock, self.writer) for i in range(client_num)]
 
     def print_percent(self, percent):
         taltol_length = 100
         shap_num = int(percent * taltol_length)
         line_num = taltol_length - shap_num
         _format_shap = "#" * shap_num
-        _format_shap = _format_shap + str(percent)
+        _format_shap = _format_shap + "%" + str(percent.sum() * 100)
         _formate_line = "-" * line_num
         print(_format_shap + _formate_line)
         
 
-    def train(self, test_epoch, end_rate, train_rate, client_num):
+    def train(self, test_epoch, end_rate, train_rate, epoch, batch_size, client_num):
         '''训练模型参数'''
         self.__train_init__(client_num)
         #进行epoch轮迭代
         choiced_clients_num = int(train_rate * len(self.clients))
-        epoch = 0
         total_epoch = 0
         while(True):
             #挑选train_rate * len(clients)个参与方
@@ -57,24 +56,22 @@ class Server():
             thread_list = []
             for single_client in choiced_clients:
                 #同步训练，获得局部模型参数
-                thread = Thread(target=single_client.update_parameters, args=(params_queue, 5, 2000), daemon=True, name="{}".format(single_client.client_id))
+                thread = Thread(target=single_client.update_parameters, args=(params_queue, epoch, batch_size), daemon=True, name="{}".format(single_client.client_id))
                 thread_list.append(thread)
                 thread.start()
             #等待参与方训练完成
             for t in thread_list:
                 t.join()
             #加权平均
-            global_params = self.__parameter_weight_divition__(params_queue, len(choiced_clients))
+            global_params = self.__parameter_weight_divition__(params_queue)
             self.set_clients_parameters(self.clients, global_params)
             #判断是否结束训练
-            epoch += 1
             total_epoch += 1
             print("第{}轮训练：".format(total_epoch))
             #查看内存使用率
             info = psutil.virtual_memory()
             print("内存使用率:" + str(info.percent))
-            if(epoch % test_epoch == 0):
-                epoch = 0
+            if(total_epoch % test_epoch == 0):
                 current_rate = self.test()
                 self.print_percent(current_rate)
                 self.writer.add_scalars(main_tag="accuracy", tag_scalar_dict={"without_kl": current_rate}, global_step=total_epoch)
@@ -90,18 +87,32 @@ class Server():
         return choiced_client[0].save(save_path)
 
 
-    def __parameter_weight_divition__(self, params_queue, divide_num):
+    def __parameter_weight_divition__(self, params_queue):
         '''对所有参与方的参数加和'''
         if params_queue.empty():
             raise Exception("没有能进行加和的参数..")
-        head_elem = params_queue.get()
-        if(isinstance(head_elem, dict) == False):
-            raise Exception("参数类型不正确.")
-        head_param = head_elem["params"]
+        params_list = []
+        kl_list = []
+        #先取出所有元素
         while(params_queue.empty() == False):
-            item = params_queue.get()["params"]
-            head_param = self.trans.list_add(head_param, item)
-        return self.trans.list_divide(head_param, divide_num)
+            params_dics = params_queue.get()
+            #先检验参数类型
+            if(isinstance(params_dics, dict)is not True):
+                raise Exception("参数类型不正确")
+            params_list.append(params_dics["params"])
+            kl_list.append(params_dics["kl_div"])
+        if(len(params_list) != len(kl_list)):
+            raise Exception("参数列表与KL散度列表不匹配")
+        kl_ten = torch.Tensor(kl_list)
+        kl_taltol = kl_ten.sum()
+        #熵权法算出所占比例
+        kl_percent =((-kl_ten + 1) / (len(kl_list) + kl_taltol))
+        print(kl_percent)
+        #加权平均
+        result_ten = torch.zeros(1).float()
+        for i in range(len(params_list)):
+            result_ten = result_ten + torch.Tensor(params_list[i]) * kl_percent[i]
+        return result_ten.tolist()
         
 
     def set_clients_parameters(self, clients, para):
