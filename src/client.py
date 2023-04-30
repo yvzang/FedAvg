@@ -81,13 +81,9 @@ class Client():
                 self.writer.add_scalars(main_tag="loss", tag_scalar_dict={"without_kl_".format(self.client_id): curr_loss}, global_step=self.taltol_epoch)
                 self.taltol_epoch = self.taltol_epoch + 1
         elem_taltol_num = elem_num_list.sum()
-        #计算kl散度
-        p = elem_num_list.float() / elem_taltol_num
-        q = [1/10 for i in range(10)]
-        kl_div = stats.entropy(p.tolist(), q)
         print("第{}个参与方迭代, 损失值：{}".format(self.client_id, curr_loss))
         self.lock.acquire()
-        params_queue.put({"params":self.trans.para_to_list(self.get_parameters(), self.local_module), "kl_div": kl_div}, block=True)
+        params_queue.put({"params":self.trans.para_to_list(self.get_parameters(), self.local_module)}, block=True)
         self.lock.release()
         return
 
