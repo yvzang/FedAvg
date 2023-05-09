@@ -54,12 +54,13 @@ class Server():
             thread_list = []
             for single_client in choiced_clients:
                 #同步训练，获得局部模型参数
-                thread = Thread(target=single_client.update_parameters, args=(params_queue, epoch, batch_size), daemon=True, name="{}".format(single_client.client_id))
+                '''thread = Thread(target=single_client.update_parameters, args=(params_queue, epoch, batch_size), daemon=True, name="{}".format(single_client.client_id))
                 thread_list.append(thread)
                 thread.start()
             #等待参与方训练完成
             for t in thread_list:
-                t.join()
+                t.join()'''
+                single_client.update_parameters(params_queue, epoch, batch_size)
             #加权平均
             global_params = self.__parameter_weight_divition__(params_queue, choiced_clients_num)
             self.set_clients_parameters(self.clients, global_params)

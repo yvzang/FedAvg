@@ -9,5 +9,5 @@ if __name__ == "__main__":
     client2 = Client(1)
     client2.set_weight([2, 3])
     ser.add_clients([client1, client2])
-    ser.train(5, 0.8, 1, 1, 1000)
+    ser.train(5, 0.8, 1, 1, 50)
     ser.test()
