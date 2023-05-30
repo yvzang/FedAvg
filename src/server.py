@@ -2,10 +2,13 @@ import torch
 from Module import cifar10
 from client import Client
 from torch.utils.data import DataLoader
+from torch.nn.modules import CrossEntropyLoss
 import random
 from threading import Thread, Lock
 from transformer import Transformer
 from copy import deepcopy
+import torchvision
+from torch.utils.data import WeightedRandomSampler
 from torch.utils.tensorboard import SummaryWriter
 import queue
 import psutil
@@ -15,10 +18,15 @@ class Server():
     def __init__(self):
         self.module_path = "module.pth"
         self.module = self.__to_cuda__(cifar10())
+        self.testdataset = torchvision.datasets.CIFAR10("./resource/cifar10", train=False,
+                                    transform=torchvision.transforms.ToTensor(), download=True)
+        self.testdadaloader = DataLoader(self.testdataset, 200, True)
+        self.loss_fn = self.__to_cuda__(CrossEntropyLoss())
         self.clients = []
         self.trans = Transformer()
         self.writer = SummaryWriter(log_dir="./runs/fedprox")
         self.learning_rate = 0.01
+        self.norm_rate = 0.01
         self.optim = torch.optim.SGD(self.module.parameters(), self.learning_rate)
 
     def __to_cuda__(self, module):
@@ -69,8 +77,6 @@ class Server():
             #判断是否结束训练
             total_epoch += 1
             print("第{}轮训练：".format(total_epoch))
-            #查看内存使用率
-            info = psutil.virtual_memory()
             if(total_epoch % test_epoch == 0):
                 current_rate = self.test()
                 self.print_percent(current_rate)
@@ -85,25 +91,59 @@ class Server():
     def save(self, save_path):
         choiced_client = random.sample(self.clients, 1)
         return choiced_client[0].save(save_path)
+    
+    def __get_loss__(self):
+        loss = torch.zeros(1)
+        for image, label in self.testdadaloader:
+            image = self.__to_cuda__(image)
+            label = self.__to_cuda__(label)
+            output = self.module(image)
+            #计算原来的损失
+            curr_loss = self.loss_fn(output, label)
+            loss += curr_loss
+        return loss
+    
+    def calculate_score(self, pseudo_grad):
+        with torch.set_grad_enabled(False):
+            old_weight = deepcopy(self.module.state_dict())
+            old_loss = self.__get_loss__()
+            #计算更新后的损失
+            with torch.set_grad_enabled(True):
+                self.optim.zero_grad()
+                norm_tatol = torch.zeros(1)
+                for(param_name, param) in self.module.named_parameters():
+                    param.grad = pseudo_grad[param_name]
+                    ten_grad = pseudo_grad[param_name].reshape([-1])
+                    norm_tatol += ten_grad.norm(2, dim=0)
+                self.optim.step()
+
+            new_loss = self.__get_loss__()
+            score = old_loss - new_loss + self.norm_rate * (1 / norm_tatol)
+            self.module.load_state_dict(old_weight)
+            return score.item()
 
 
     def __parameter_weight_divition__(self, params_queue, divide_num):
         '''对所有参与方的参数加和'''
         if params_queue.empty():
             raise Exception("没有能进行加和的参数..")
-        head_elem = params_queue.get()
-        if(isinstance(head_elem, dict) == False):
-            raise Exception("参数类型不正确.")
-        params_list = [head_elem["params"]]
-        while(params_queue.empty() == False):
-            params_list.append(params_queue.get()["params"])
-        self.optim.zero_grad()
-        for(param_name, param) in self.module.named_parameters():
-            param.grad = torch.zeros_like(param)
-            for pseudo_grad in params_list:
-               param.grad = param.grad + (1 / len(params_list)) * pseudo_grad[param_name]
-        self.optim.step()
-        return self.module.state_dict()
+        with torch.set_grad_enabled(True):
+            #先取出所有梯度
+            params_list = []
+            norm_list = []
+            while(params_queue.empty() == False):
+                param = params_queue.get()["params"]
+                params_list.append(param)
+                #norm_list.append(self.calculate_score(param))
+            print(norm_list)
+            #聚合
+            self.optim.zero_grad()
+            for(param_name, param) in self.module.named_parameters():
+                param.grad = torch.zeros_like(param)
+                for score, pseudo_grad in zip(norm_list, params_list):
+                    param.grad = param.grad + (1 / len(params_list)) * pseudo_grad[param_name]
+            self.optim.step()
+            return self.module.state_dict()
 
     def set_clients_parameters(self, clients, para):
         '''将参数para传递给参与方列表clients'''

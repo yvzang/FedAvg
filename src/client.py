@@ -118,7 +118,6 @@ class Client():
                 loss_list = (loss_list == label).sum()
                 total_loss += loss_list.float()
             mean_loss = total_loss / (len(data_batch) * mini_batch)
-            print("平均正确率为{}".format(mean_loss))
             return mean_loss
 
     def save(self, save_path):
