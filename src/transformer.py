@@ -43,7 +43,7 @@ class Transformer():
             field_lst = lst[:field]
             lst = lst[field:]
             tens = torch.Tensor(field_lst).reshape(value.shape)
-            para_dict[key] = tens
+            para_dict[key] = tens.cuda()
         return para_dict
 
     def list_to_grad(self, lst, parameters, module):

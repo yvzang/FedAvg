@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader
 import random
 from threading import Thread, Lock
 from transformer import Transformer
+from copy import deepcopy
 from torch.utils.tensorboard import SummaryWriter
 import queue
 import psutil
@@ -13,10 +14,12 @@ import psutil
 class Server():
     def __init__(self):
         self.module_path = "module.pth"
-        self.module = cifar10()
+        self.module = self.__to_cuda__(cifar10())
         self.clients = []
         self.trans = Transformer()
         self.writer = SummaryWriter(log_dir="./runs/fedprox")
+        self.learning_rate = 0.01
+        self.optim = torch.optim.SGD(self.module.parameters(), self.learning_rate)
 
     def __to_cuda__(self, module):
         if(torch.cuda.is_available()):
@@ -54,13 +57,12 @@ class Server():
             thread_list = []
             for single_client in choiced_clients:
                 #同步训练，获得局部模型参数
-                '''thread = Thread(target=single_client.update_parameters, args=(params_queue, epoch, batch_size), daemon=True, name="{}".format(single_client.client_id))
+                thread = Thread(target=single_client.update_parameters, args=(params_queue, epoch, batch_size), daemon=True, name="{}".format(single_client.client_id))
                 thread_list.append(thread)
                 thread.start()
             #等待参与方训练完成
             for t in thread_list:
-                t.join()'''
-                single_client.update_parameters(params_queue, epoch, batch_size)
+                t.join()
             #加权平均
             global_params = self.__parameter_weight_divition__(params_queue, choiced_clients_num)
             self.set_clients_parameters(self.clients, global_params)
@@ -69,7 +71,6 @@ class Server():
             print("第{}轮训练：".format(total_epoch))
             #查看内存使用率
             info = psutil.virtual_memory()
-            print("内存使用率:" + str(info.percent))
             if(total_epoch % test_epoch == 0):
                 current_rate = self.test()
                 self.print_percent(current_rate)
@@ -93,14 +94,18 @@ class Server():
         head_elem = params_queue.get()
         if(isinstance(head_elem, dict) == False):
             raise Exception("参数类型不正确.")
-        head_param = head_elem["params"]
+        params_list = [head_elem["params"]]
         while(params_queue.empty() == False):
-            item = params_queue.get()["params"]
-            head_param = self.trans.list_add(head_param, item)
-        return self.trans.list_divide(head_param, divide_num)
-        
+            params_list.append(params_queue.get()["params"])
+        self.optim.zero_grad()
+        for(param_name, param) in self.module.named_parameters():
+            param.grad = torch.zeros_like(param)
+            for pseudo_grad in params_list:
+               param.grad = param.grad + (1 / len(params_list)) * pseudo_grad[param_name]
+        self.optim.step()
+        return self.module.state_dict()
 
     def set_clients_parameters(self, clients, para):
         '''将参数para传递给参与方列表clients'''
         for client in clients:
-            client.set_parameters_from_list(para)
+            client.set_parameters(para)
