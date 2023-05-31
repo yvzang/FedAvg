@@ -27,6 +27,7 @@ class Server():
         self.writer = SummaryWriter(log_dir="./runs/fedprox")
         self.learning_rate = 0.01
         self.norm_rate = 0.01
+        self.agg_rate = 0.5
         self.optim = torch.optim.SGD(self.module.parameters(), self.learning_rate)
 
     def __to_cuda__(self, module):
@@ -134,14 +135,21 @@ class Server():
             while(params_queue.empty() == False):
                 param = params_queue.get()["params"]
                 params_list.append(param)
-                #norm_list.append(self.calculate_score(param))
-            print(norm_list)
+                norm_list.append(self.calculate_score(param))
+            norm_params_list = list(zip(norm_list, params_list))
+            #筛选
+            norm_params_list.sort(key=lambda np: np[0], reverse=True)
+            aggregation_list = norm_params_list[:int(len(norm_params_list) * self.agg_rate)]
+            if(len(aggregation_list) == 0):
+                raise Exception("score-parameters对为空")
+            total_score = sum([score for score, _ in aggregation_list])
+            print(len(aggregation_list))
             #聚合
             self.optim.zero_grad()
             for(param_name, param) in self.module.named_parameters():
                 param.grad = torch.zeros_like(param)
-                for score, pseudo_grad in zip(norm_list, params_list):
-                    param.grad = param.grad + (1 / len(params_list)) * pseudo_grad[param_name]
+                for score, pseudo_grad in aggregation_list:
+                    param.grad = param.grad + (score / total_score) * pseudo_grad[param_name]
             self.optim.step()
             return self.module.state_dict()
 

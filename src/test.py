@@ -37,10 +37,4 @@ class cifar10(torch.nn.Module):
         return tens
     
 if __name__ == "__main__":
-    dataset = torchvision.datasets.CIFAR10("./resource/cifar10", train=True,
-                                                transform=torchvision.transforms.ToTensor(), download=True)
-    weights = [2 if label == 0 or label == 1 else 1 for image, label in dataset]
-    samper = WeightedRandomSampler(weights, 50000, True)
-    loader = DataLoader(dataset, 2000, False, samper)
-    for image, label in loader:
-        print(torch.unique(label, return_counts=True))
+    pass
