@@ -27,7 +27,7 @@ class Server():
         self.writer = SummaryWriter(log_dir="./runs/fedprox")
         self.learning_rate = 0.01
         self.norm_rate = 0.01
-        self.agg_rate = 0.5
+        self.agg_rate = 1
         self.optim = torch.optim.SGD(self.module.parameters(), self.learning_rate)
 
     def __to_cuda__(self, module):
@@ -145,7 +145,7 @@ class Server():
             total_score = sum([score for score, _ in aggregation_list])
             print(len(aggregation_list))
             #聚合
-            self.optim.zero_grad()
+            #self.optim.zero_grad()
             for(param_name, param) in self.module.named_parameters():
                 param.grad = torch.zeros_like(param)
                 for score, pseudo_grad in aggregation_list:
