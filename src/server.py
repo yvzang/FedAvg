@@ -139,13 +139,12 @@ class Server():
             norm_params_list = list(zip(norm_list, params_list))
             #筛选
             norm_params_list.sort(key=lambda np: np[0], reverse=True)
-            aggregation_list = norm_params_list[:int(len(norm_params_list) * self.agg_rate)]
+            aggregation_list = deepcopy(norm_params_list[:int(len(norm_params_list) * self.agg_rate)])
             if(len(aggregation_list) == 0):
                 raise Exception("score-parameters对为空")
             total_score = sum([score for score, _ in aggregation_list])
-            print(len(aggregation_list))
             #聚合
-            #self.optim.zero_grad()
+            self.optim.zero_grad()
             for(param_name, param) in self.module.named_parameters():
                 param.grad = torch.zeros_like(param)
                 for score, pseudo_grad in aggregation_list:
