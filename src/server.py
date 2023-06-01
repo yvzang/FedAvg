@@ -18,15 +18,16 @@ class Server():
     def __init__(self):
         self.module_path = "module.pth"
         self.module = self.__to_cuda__(cifar10())
+        self.testbatchsize = 200
         self.testdataset = torchvision.datasets.CIFAR10("./resource/cifar10", train=False,
                                     transform=torchvision.transforms.ToTensor(), download=True)
-        self.testdadaloader = DataLoader(self.testdataset, 200, True)
+        self.testdadaloader = DataLoader(self.testdataset, self.testbatchsize, True)
         self.loss_fn = self.__to_cuda__(CrossEntropyLoss())
         self.clients = []
         self.trans = Transformer()
         self.writer = SummaryWriter(log_dir="./runs/fedprox")
-        self.learning_rate = 0.01
-        self.norm_rate = 0.01
+        self.learning_rate = 0.1
+        self.norm_rate = 0.05
         self.agg_rate = 1
         self.optim = torch.optim.SGD(self.module.parameters(), self.learning_rate)
 
@@ -46,7 +47,7 @@ class Server():
         shap_num = int(percent * taltol_length)
         line_num = taltol_length - shap_num
         _format_shap = "#" * shap_num
-        _format_shap = _format_shap + "%" + str(percent.item() * 100)
+        _format_shap = _format_shap + "%{:.4f}" + str(percent.item() * 100)
         _formate_line = "-" * line_num
         print(_format_shap + _formate_line)
         
@@ -74,51 +75,56 @@ class Server():
                 t.join()
             #加权平均
             global_params = self.__parameter_weight_divition__(params_queue, choiced_clients_num)
+            loss, accuracy = self.__get_loss__()
+            print("loss: {}".format(loss.item()) + ", accuracy: {}".format(accuracy.item()))
+            self.writer.add_scalars(main_tag="loss", tag_scalar_dict={"p=4,q=1": loss}, global_step=total_epoch)
             self.set_clients_parameters(self.clients, global_params)
             #判断是否结束训练
             total_epoch += 1
             print("第{}轮训练：".format(total_epoch))
             if(total_epoch % test_epoch == 0):
-                current_rate = self.test()
-                self.print_percent(current_rate)
-                self.writer.add_scalars(main_tag="accuracy", tag_scalar_dict={"without_kl": current_rate}, global_step=total_epoch)
-                if current_rate >= end_rate:
+                self.print_percent(accuracy)
+                self.writer.add_scalars(main_tag="accuracy", tag_scalar_dict={"p=4,q=1": accuracy}, global_step=total_epoch)
+                if accuracy >= end_rate:
                     break
 
-    def test(self):
-        choiced_client = random.sample(self.clients, 1)
-        return choiced_client[0].test()
 
     def save(self, save_path):
         choiced_client = random.sample(self.clients, 1)
         return choiced_client[0].save(save_path)
     
     def __get_loss__(self):
-        loss = torch.zeros(1)
+        loss = self.__to_cuda__(torch.zeros(1))
+        accuracy = self.__to_cuda__(torch.zeros(1))
         for image, label in self.testdadaloader:
             image = self.__to_cuda__(image)
             label = self.__to_cuda__(label)
             output = self.module(image)
-            #计算原来的损失
+            #计算损失
             curr_loss = self.loss_fn(output, label)
             loss += curr_loss
-        return loss
+            #计算准确率
+            accu_list = output.argmax(1)
+            accu_list = (accu_list == label).sum()
+            accuracy += accu_list.float()
+        mean_accu = accuracy / (len(self.testdadaloader) * self.testbatchsize)
+        return loss, mean_accu
     
     def calculate_score(self, pseudo_grad):
         with torch.set_grad_enabled(False):
             old_weight = deepcopy(self.module.state_dict())
-            old_loss = self.__get_loss__()
+            old_loss, _ = self.__get_loss__()
             #计算更新后的损失
             with torch.set_grad_enabled(True):
                 self.optim.zero_grad()
-                norm_tatol = torch.zeros(1)
+                norm_tatol = self.__to_cuda__(torch.zeros(1))
                 for(param_name, param) in self.module.named_parameters():
                     param.grad = pseudo_grad[param_name]
                     ten_grad = pseudo_grad[param_name].reshape([-1])
                     norm_tatol += ten_grad.norm(2, dim=0)
                 self.optim.step()
 
-            new_loss = self.__get_loss__()
+            new_loss, _ = self.__get_loss__()
             score = old_loss - new_loss + self.norm_rate * (1 / norm_tatol)
             self.module.load_state_dict(old_weight)
             return score.item()

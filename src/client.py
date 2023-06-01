@@ -7,7 +7,6 @@ from copy import deepcopy
 import torch
 import gc
 import torchvision
-from scipy import stats
 
 
 class Client():
@@ -33,9 +32,9 @@ class Client():
         if(torch.cuda.is_available()):
             return module.cuda()
         
-    def set_weight(self, bios = None):
+    def set_weight(self, bios = None, rate = 1):
         if(bios is not None):
-            self.weights = [5 if label in bios else 1 for image, label in self.dataset]
+            self.weights = [rate if label in bios else 1 for image, label in self.dataset]
         
     def set_parameters(self, parameters):
         self.local_module.load_state_dict(parameters)
@@ -64,7 +63,6 @@ class Client():
         self.local_module.eval()
 
         sampler = WeightedRandomSampler(self.weights, self.dataset.__len__(), True)
-        print("参与方{}开始训练..".format(self.client_id))
         old_weights = deepcopy(self.local_module.state_dict())
         curr_loss = 0
         total_loss = 0
@@ -89,10 +87,7 @@ class Client():
         new_weight = self.local_module.state_dict()
         with torch.no_grad():
             pseudo_grad = {param_name : old_weights[param_name].data - new_weight[param_name] for param_name in new_weight.keys()}
-            #记录曲线
-            self.writer.add_scalars(main_tag="loss", tag_scalar_dict={"without_kl_".format(self.client_id): curr_loss / total_epoch}, global_step=self.taltol_epoch)
             self.taltol_epoch = self.taltol_epoch + 1
-            print("第{}个参与方迭代, 损失值：{}".format(self.client_id, total_loss / total_epoch))
             self.lock.acquire()
             params_queue.put({"params":pseudo_grad}, block=True)
             self.lock.release()
