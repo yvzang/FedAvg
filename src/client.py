@@ -32,9 +32,9 @@ class Client():
         if(torch.cuda.is_available()):
             return module.cuda()
         
-    def set_weight(self, bios = None, rate = 1):
+    def set_weight(self, bios = None):
         if(bios is not None):
-            self.weights = [rate if label in bios else 1 for image, label in self.dataset]
+            self.weights = [bios[label] for image, label in self.dataset]
         
     def set_parameters(self, parameters):
         self.local_module.load_state_dict(parameters)

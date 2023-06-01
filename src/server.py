@@ -18,7 +18,7 @@ class Server():
     def __init__(self):
         self.module_path = "module.pth"
         self.module = self.__to_cuda__(cifar10())
-        self.testbatchsize = 200
+        self.testbatchsize = 256
         self.testdataset = torchvision.datasets.CIFAR10("./resource/cifar10", train=False,
                                     transform=torchvision.transforms.ToTensor(), download=True)
         self.testdadaloader = DataLoader(self.testdataset, self.testbatchsize, True)
@@ -77,14 +77,14 @@ class Server():
             global_params = self.__parameter_weight_divition__(params_queue, choiced_clients_num)
             loss, accuracy = self.__get_loss__()
             print("loss: {}".format(loss.item()) + ", accuracy: {}".format(accuracy.item()))
-            self.writer.add_scalars(main_tag="loss", tag_scalar_dict={"p=4,q=1": loss}, global_step=total_epoch)
+            self.writer.add_scalars(main_tag="loss", tag_scalar_dict={"zeno,bios,p=10,q=1": loss}, global_step=total_epoch)
+            self.writer.add_scalars(main_tag="accuracy", tag_scalar_dict={"zeno,bios,p=10,q=1": accuracy}, global_step=total_epoch)
             self.set_clients_parameters(self.clients, global_params)
             #判断是否结束训练
             total_epoch += 1
             print("第{}轮训练：".format(total_epoch))
             if(total_epoch % test_epoch == 0):
                 self.print_percent(accuracy)
-                self.writer.add_scalars(main_tag="accuracy", tag_scalar_dict={"p=4,q=1": accuracy}, global_step=total_epoch)
                 if accuracy >= end_rate:
                     break
 
@@ -141,20 +141,20 @@ class Server():
             while(params_queue.empty() == False):
                 param = params_queue.get()["params"]
                 params_list.append(param)
-                norm_list.append(self.calculate_score(param))
-            norm_params_list = list(zip(norm_list, params_list))
+                #norm_list.append(self.calculate_score(param))
+            '''norm_params_list = list(zip(norm_list, params_list))
             #筛选
             norm_params_list.sort(key=lambda np: np[0], reverse=True)
             aggregation_list = deepcopy(norm_params_list[:int(len(norm_params_list) * self.agg_rate)])
             if(len(aggregation_list) == 0):
                 raise Exception("score-parameters对为空")
-            total_score = sum([score for score, _ in aggregation_list])
+            total_score = sum([score for score, _ in aggregation_list])'''
             #聚合
             self.optim.zero_grad()
             for(param_name, param) in self.module.named_parameters():
                 param.grad = torch.zeros_like(param)
-                for score, pseudo_grad in aggregation_list:
-                    param.grad = param.grad + (score / total_score) * pseudo_grad[param_name]
+                for pseudo_grad in params_list:
+                    param.grad = param.grad + (1 / len(params_list)) * pseudo_grad[param_name]
             self.optim.step()
             return self.module.state_dict()
 
